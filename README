@@ -1,0 +1,107 @@
+﻿                     VERSION 1.0 / PAULVH / MARCH 2016
+
+This collection of programs will read 1-wire on nearly every pin of the Raspberry.It does NOT use the 1-wire DT or modprobe, but a user program level bit shifting.
+
+Caution
+********
+Timing is extremely important (up to the microsecond) and that is a HUGE challenge with Linux as that is not a real-time system on user level. It is always better to use Device Tree (DT) or modprobe as they run in kernel mode.
+
+Background
+**********
+Wanted to understand more about 1-wire and track that with a oscilloscope. Great reading resources are http://en.wikipedia.org/wiki/1-Wire. As I testing with the 18B20, DS18B20.pdf (maxim integrated) is another great resource.
+
+I found a number of program on internet to connect with the 18B20, and all of them seem to rely on mbed.c /.h As I could not find a source of that, i have taken the programs, modified them (as it was mix of cpp and c) and build my own library (pbed.c /.h) to support that. While this program works, it has not been
+deeply tested and optimized to 100%. It is more a proof of concept that can be adjusted and optimized.
+
+The biggest challenge is timing.
+********************************
+The 1-wire timing works with time-slots as low as 15 microseconds and to capture those correctly you have to sample half-way (e.g. 7 usec). 1 microsecond means a frequency of 1MHZ.
+
+FIRST IMPLEMENTATION
+--------------------
+I tried to use nanosleep(), but that adds at least 70 to 80us to the requested value.
+In the routine wait_us() I had taking that in account for requested wait-time of more than 80us by subtracting 70us (and for those values that is for sure good enough and not critical anymore).
+However for values below the 80usec, I have build a nested while  & for- loop.
+The while-loop decrements the requested usec, the for-loop tries to provide 1 microsecond. The only way to check that was with an oscilloscope.
+That said: it is all depending on the CPU load and speed. (this was tested on aRaspberry Piv2, 600 Mhz).
+
+SECOND IMPLEMENTATION
+---------------------
+I switched from wiringPi to BCM2835(). This is a strong library that is faster than wiringPi. it has a Delay_Microsecond function that works directly on the system clock for any value below 450 microseconds. This works stable and good.
+
+THIRD IMPLEMENTATION
+---------------------
+I connected this project with an earlier HS42led project, where setitimer is used in the background to trigger refresh. However that also triggers nanasecond to return. I have taken the bcm2738_Delay_Microsecond() function into the program to have all the microsecond delay work directly on the system clock 
+Other changes were made in 18B20.c and onewire.c around the time critical code to set a capture_busy = 1 to stop HS42led refreshing and after capture_busy=0 to enable. This will only happen is _hs42led is defined.
+
+As a result however I was able to achieve on avg  1 error in 20 readings from the 18B20.
+
+
+
+INSTALLATION
+************
+## Hardware 
+For connection of the 18B20 see the instructions in many places online or DS18b20.pdf.
+
+The  pin that will be used is defined in pbed.h :
+#define ONEWIRE_PIN  23   ( GPIO 23 - pin 16 on the 40 pin plug)
+
+To track the reading moment with an oscilloscope I included a possibility to sent pulse in the ow_pin_input() on a debug-pin. I has some impact but very extremely low. The debug-pin is defined in top of pbed.h :
+
+#define DEBUG_PIN 17
+
+Remove and recompile to enable debug pulse the comments before:
+//#define DEBUG 1;
+
+to :
+
+#define DEBUG 1;
+
+## Software
+
+This is implementation is depending on BCM2835 that needs to be installed first.
+
+To install BCM2835:
+
+BCM2835 library
+Install latest from BCM2835 from : http://www.airspayce.com/mikem/bcm2835/
+
+1. wget http://www.airspayce.com/mikem/bcm2835/bcm2835-1.50.tar.gz
+2. tar -zxf bcm2835-1.50.tar.gz		// 1.50 was version number at the time of writting
+3. cd bcm2835-1.50
+4. ./configure
+5. sudo make check
+6. sudo make install
+
+To install the 1-wire driver on user level :
+
+cd /home/pi
+tar -xvzf 1wusr.tar.gz
+cd 1wusr
+
+# compile
+./build_1w  
+
+# run
+./tt
+
+
+combination with hs42led
+************************
+
+In a separate project I developed a driver + examples for the H420561K 4 digit led. The results from 18B20 can be displayed on this led.
+
+In order to combine  do the following steps
+
+Install 1wusr as documented. 
+
+Copy all the files  from 1wusr into the SAME  directory as hs42led. 
+
+In pbed.h  change the line 
+	//#define _hs42led 
+		to 
+	# define _hs42led (so remove the comment //) 
+
+compile:  ./build_with 
+
+run:   ./tt
